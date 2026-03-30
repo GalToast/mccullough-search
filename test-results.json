@@ -1,10 +1,10 @@
 {
-  "timestamp": "2026-03-30T15:25:23.026Z",
+  "timestamp": "2026-03-30T15:30:35.276Z",
   "totalTests": 6,
-  "hits": 6,
-  "misses": 0,
+  "hits": 5,
+  "misses": 1,
   "pending": 0,
-  "hitRate": 1,
+  "hitRate": 0.8333333333333334,
   "results": [
     {
       "leadId": 9,
@@ -16,17 +16,7 @@
       "candidates": [
         {
           "domain": "105speedwayracing.com",
-          "score": 46,
-          "verified": false
-        },
-        {
-          "domain": "y105music.com",
-          "score": 36,
-          "verified": false
-        },
-        {
-          "domain": "www.love105fm.com",
-          "score": 36,
+          "score": 50,
           "verified": false
         }
       ]
@@ -36,13 +26,13 @@
       "name": "Good Charlie's Oyster Bar",
       "expectedDomain": "goodcharlies.com",
       "foundDomain": "goodcharlies.com",
-      "verified": true,
+      "verified": false,
       "verdict": "HIT",
       "candidates": [
         {
           "domain": "goodcharlies.com",
           "score": 44,
-          "verified": true
+          "verified": false
         }
       ]
     },
@@ -50,49 +40,23 @@
       "leadId": 3,
       "name": "Northern Tool and Equipment",
       "expectedDomain": "northerntool.com",
-      "foundDomain": "northerntool.com",
+      "foundDomain": "none",
       "verified": false,
-      "verdict": "HIT",
-      "candidates": [
-        {
-          "domain": "www.northerntool.com",
-          "score": 76,
-          "verified": false
-        },
-        {
-          "domain": "catalog.northerntool.com",
-          "score": 76,
-          "verified": false
-        },
-        {
-          "domain": "www.city-data.com",
-          "score": 26,
-          "verified": false
-        }
-      ]
+      "verdict": "MISS",
+      "candidates": []
     },
     {
       "leadId": 1,
       "name": "1845 SOLUTIONS",
       "expectedDomain": "1845solutions.com",
       "foundDomain": "1845solutions.com",
-      "verified": false,
+      "verified": true,
       "verdict": "HIT",
       "candidates": [
         {
           "domain": "1845solutions.com",
           "score": 50,
-          "verified": false
-        },
-        {
-          "domain": "www.onthisday.com",
-          "score": 16,
-          "verified": false
-        },
-        {
-          "domain": "www.history.com",
-          "score": 16,
-          "verified": false
+          "verified": true
         }
       ]
     },
@@ -107,16 +71,6 @@
         {
           "domain": "1097watersports.com",
           "score": 45,
-          "verified": false
-        },
-        {
-          "domain": "www.onthisday.com",
-          "score": 16,
-          "verified": false
-        },
-        {
-          "domain": "accountably.com",
-          "score": 16,
           "verified": false
         }
       ]

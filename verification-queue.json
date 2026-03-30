@@ -3,15 +3,9 @@
     "leadId": 3,
     "name": "Northern Tool and Equipment",
     "expectedDomain": "northerntool.com",
-    "foundDomain": "city-data.com",
+    "foundDomain": "none",
     "verified": false,
     "verdict": "MISS",
-    "candidates": [
-      {
-        "domain": "www.city-data.com",
-        "score": 26,
-        "verified": false
-      }
-    ]
+    "candidates": []
   }
 ]
