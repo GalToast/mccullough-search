@@ -1,0 +1,114 @@
+[
+  {
+    "leadId": 283,
+    "name": "AD-NET, INC.",
+    "city": "",
+    "state": "TX",
+    "expectedDomain": "ad-netinc.com"
+  },
+  {
+    "leadId": 470,
+    "name": "AMERICAN SHOP TOOLS, LLC",
+    "city": "",
+    "state": "TX",
+    "expectedDomain": "americanshoptools.com"
+  },
+  {
+    "leadId": 493,
+    "name": "AMPED ENERGY SOLUTIONS LLC",
+    "city": "",
+    "state": "TX",
+    "expectedDomain": "ampedenergysolutions.com"
+  },
+  {
+    "leadId": 673,
+    "name": "ASTRO FENCE CORPORATION",
+    "city": "Conroe",
+    "state": "TX",
+    "expectedDomain": "astrofencecompany.com"
+  },
+  {
+    "leadId": 750,
+    "name": "750-bailiff-enterprises-inc",
+    "city": "Willis",
+    "state": "TX",
+    "expectedDomain": "bailifftanks.com"
+  },
+  {
+    "leadId": 778,
+    "name": "778-barnshow-productions",
+    "city": "Conroe",
+    "state": "TX",
+    "expectedDomain": "barnshowproductions.com"
+  },
+  {
+    "leadId": 967,
+    "name": "BLACKSPOT MILLWORKS LLC",
+    "city": "Cleveland",
+    "state": "TX",
+    "expectedDomain": "blackspotmillworks.com"
+  },
+  {
+    "leadId": 1713,
+    "name": "1713-conroe-golf-cars",
+    "city": "Conroe",
+    "state": "TX",
+    "expectedDomain": "conroegolfcars.com"
+  },
+  {
+    "leadId": 1774,
+    "name": "1774-cool-tech-equipment-llc",
+    "city": "Conroe",
+    "state": "TX",
+    "expectedDomain": "cooltechequipment.com"
+  },
+  {
+    "leadId": 1902,
+    "name": "1902-cue-construction-services",
+    "city": "Cleveland",
+    "state": "TX",
+    "expectedDomain": "cueconstructionservices.com"
+  },
+  {
+    "leadId": 2027,
+    "name": "2027-db-bit-services-llc",
+    "city": "Conroe",
+    "state": "TX",
+    "expectedDomain": "dbbitservices.com"
+  },
+  {
+    "leadId": 2252,
+    "name": "2252-down-south-custom-wheels-llc",
+    "city": "",
+    "state": "TX",
+    "expectedDomain": "dscwheels.com"
+  },
+  {
+    "leadId": 2918,
+    "name": "2918-gary-keith-jackson-design-inc",
+    "city": "The Woodlands",
+    "state": "TX",
+    "expectedDomain": "gkjdesign.com"
+  },
+  {
+    "leadId": 4189,
+    "name": "4189-knockout-custom-pools-llc",
+    "city": "",
+    "state": "TX",
+    "expectedDomain": "knockoutcustompoolsllc.com"
+  },
+  {
+    "leadId": 6451,
+    "name": "6451-hunting-forebears-genealogical-services-llc",
+    "city": "",
+    "state": "TX",
+    "expectedDomain": "huntingforebears.com"
+  },
+  {
+    "leadId": 7402,
+    "name": "7402-the-historic-hill-house-and-farm-llc",
+    "city": "Willis",
+    "state": "TX",
+    "expectedDomain": "thehistorichillhouse.com"
+  }
+]

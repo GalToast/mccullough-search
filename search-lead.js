@@ -16,11 +16,14 @@ const fs = require('fs');
 const path = require('path');
 
 // SearXNG endpoint (localhost for dev, will be docker in GitHub Actions)
-const SEARXNG_URL = process.env.SEARXNG_URL || 'http://127.0.0.1:8889';
+const LOCAL_SEARXNG_URL = 'http://127.0.0.1:8889';
+const CONFIGURED_SEARXNG_URL = process.env.SEARXNG_URL || LOCAL_SEARXNG_URL;
+let activeSearxngUrl = CONFIGURED_SEARXNG_URL;
+let searxngConfigCache = null;
 
-// Search engines to use - empty means ALL enabled engines (best coverage)
-// Leaving empty uses every enabled backend for maximum local business discovery
+// Search engines to use. Empty means discover the instance's enabled general/web engines.
 const DEFAULT_ENGINES = [];
+const DEFAULT_ENGINE_PROFILE = 'text-primary';
 
 // Business directory domains to deprioritize (not real websites)
 const DIRECTORY_DOMAINS = [
@@ -93,6 +96,33 @@ const GOOD_SIGNALS = [
 
 // Regex to clean slugified names
 const SLUG_PATTERN = /^(\d+)-(.+)$/;
+const BUSINESS_SUFFIXES = new Set([
+  'llc', 'inc', 'ltd', 'corp', 'co', 'company', 'group', 'enterprises',
+  'enterprise', 'services', 'solutions', 'management', 'holdings'
+]);
+const GENERIC_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'into', 'your', 'our', 'official',
+  'website', 'texas', 'tx'
+]);
+const LOCAL_SITE_HINTS = ['contact', 'about', 'services', 'locations', 'location', 'menu', 'hours'];
+const CDN_HOST_PATTERNS = [
+  'storage.googleapis.com',
+  'googleusercontent.com',
+  'cloudfront.net',
+  'azureedge.net',
+  'akamaihd.net',
+  'akamaized.net',
+  'fastly.net',
+  'fastlylb.net',
+  'cdn.',
+  'images.',
+  'imgix.net',
+  'shopifycdn.com',
+  'cloudinary.com',
+  's3.amazonaws.com',
+  '.s3.amazonaws.com',
+  '.r2.dev'
+];
 
 /**
  * Parse CLI args
@@ -139,12 +169,81 @@ function cleanName(rawName) {
   return name.trim();
 }
 
+function stripBusinessSuffixes(name) {
+  return name
+    .replace(/\b(llc|inc|ltd|corp|co|company)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeAlphaNum(value) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getSignificantNameParts(name) {
+  const stripped = stripBusinessSuffixes(name.toLowerCase());
+  return stripped
+    .split(/[^a-z0-9]+/)
+    .filter(part => part.length > 2 && !BUSINESS_SUFFIXES.has(part) && !GENERIC_STOPWORDS.has(part));
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeLeadNameForSearch(name) {
+  return cleanName(name || '').replace(/\s+/g, ' ').trim();
+}
+
+function getNameVariants(name) {
+  const normalized = normalizeLeadNameForSearch(name);
+  const stripped = stripBusinessSuffixes(normalized);
+  const parts = getSignificantNameParts(normalized);
+  const acronym = parts.map(part => part[0]).join('');
+  const tailWord = parts.length >= 2 ? parts[parts.length - 1] : '';
+  const coreParts = tailWord ? parts.slice(0, -1) : parts;
+  const coreAcronym = coreParts.map(part => part[0]).join('');
+  const compact = parts.join('');
+  return {
+    normalized,
+    stripped,
+    parts,
+    acronym,
+    coreAcronym,
+    tailWord,
+    compact
+  };
+}
+
+function normalizeEngineProfile(profile) {
+  const value = (profile || DEFAULT_ENGINE_PROFILE).toLowerCase();
+  if (['full', 'full-primary', 'all-primary', 'all'].includes(value)) return 'full-primary';
+  return 'text-primary';
+}
+
+function isCdnLikeHost(domain) {
+  const normalized = normalizeDomain(domain);
+  if (!normalized) return false;
+  return CDN_HOST_PATTERNS.some(pattern => normalized === pattern || normalized.includes(pattern));
+}
+
 /**
  * Verify a candidate URL by fetching and checking content
  * Returns verification score (0-100) and evidence
  */
 async function verifyCandidate(url, leadName, location) {
   return new Promise((resolve) => {
+    const candidateDomain = extractDomain(url);
+    if (isCdnLikeHost(candidateDomain)) {
+      resolve({
+        verified: false,
+        score: 0,
+        reason: 'cdn/asset host rejected'
+      });
+      return;
+    }
+    const strongIdentityHost = isStrongFirstPartyMatch(candidateDomain, leadName);
+
     const client = url.startsWith('https') ? https : http;
     const timeout = 10000; // 10 second timeout
     
@@ -168,6 +267,12 @@ async function verifyCandidate(url, leadName, location) {
       res.on('data', chunk => body += chunk);
       res.on('end', () => {
         const verification = verifyPageContent(body, leadName, location);
+        if (!strongIdentityHost && verification.verified) {
+          verification.verified = false;
+          verification.score = Math.min(verification.score, 20);
+          verification.reason = 'weak domain identity';
+          verification.evidence = [...(verification.evidence || []), 'weak domain identity'];
+        }
         resolve(verification);
       });
     });
@@ -187,8 +292,11 @@ async function verifyCandidate(url, leadName, location) {
  * Check page content for business name and location matches
  */
 function verifyPageContent(html, leadName, location) {
+  const leadIdentity = getNameVariants(leadName);
   const text = html.toLowerCase();
-  const nameLower = leadName.toLowerCase();
+  const compactText = normalizeAlphaNum(html);
+  const nameLower = leadIdentity.normalized.toLowerCase();
+  const strippedName = leadIdentity.stripped;
   const cityLower = (location?.city || '').toLowerCase();
   const stateLower = (location?.state || '').toLowerCase();
   
@@ -211,11 +319,25 @@ function verifyPageContent(html, leadName, location) {
   }
   
   // Check for partial name match (at least 2 significant words)
-  const words = nameLower.split(/\s+/).filter(w => w.length > 2 && !['llc', 'inc', 'ltd', 'corp', 'the', 'and'].includes(w));
+  const words = leadIdentity.parts;
   const matchedWords = words.filter(w => text.includes(w));
-  if (matchedWords.length >= 2) {
-    score += 20;
+  const requiredWordMatches = words.length <= 2 ? words.length : 2;
+  if (matchedWords.length >= requiredWordMatches && requiredWordMatches > 0) {
+    score += 30;
     evidence.push(`partial name: ${matchedWords.join(', ')}`);
+  }
+
+  const compactLeadName = normalizeAlphaNum(strippedName);
+  const hasCompactNameMatch = compactLeadName.length > 5 && compactText.includes(compactLeadName);
+  if (hasCompactNameMatch) {
+    score += 35;
+    evidence.push('compact name match');
+  }
+
+  const acronym = leadIdentity.acronym;
+  if (acronym.length >= 3 && compactText.includes(acronym)) {
+    score += 15;
+    evidence.push(`acronym match: "${acronym}"`);
   }
   
   // Check for city
@@ -225,7 +347,7 @@ function verifyPageContent(html, leadName, location) {
   }
   
   // Check for state
-  if (stateLower && text.includes(stateLower)) {
+  if (stateLower && new RegExp(`\\b${escapeRegex(stateLower)}\\b`, 'i').test(text)) {
     score += 10;
     evidence.push(`state found: "${stateLower}"`);
   }
@@ -237,6 +359,12 @@ function verifyPageContent(html, leadName, location) {
     score += 15;
     evidence.push(`business page: ${foundIndicators.slice(0, 3).join(', ')}`);
   }
+
+  const contactHints = LOCAL_SITE_HINTS.filter(hint => text.includes(hint));
+  if (contactHints.length >= 2) {
+    score += 10;
+    evidence.push(`site hints: ${contactHints.slice(0, 2).join(', ')}`);
+  }
   
   // Penalize directory/irrelevant pages
   const badSignals = ['yelp', 'yellowpages', 'facebook.com/', 'linkedin.com/', 'directory', 'listing', 'reviews'];
@@ -246,8 +374,18 @@ function verifyPageContent(html, leadName, location) {
       evidence.push(`directory signal: "${bad}"`);
     }
   }
+
+  if (matchedWords.length === 0 && !hasCompactNameMatch) {
+    score -= 40;
+    evidence.push('missing business identity');
+  }
+
+  if (/\b(storage\.googleapis|cloudfront|azureedge|akamai|fastly|cloudinary|imgix|shopifycdn|cdn)\b/i.test(text)) {
+    score -= 80;
+    evidence.push('asset host signal');
+  }
   
-  const verified = score >= 50;
+  const verified = score >= 60 && (matchedWords.length >= requiredWordMatches || hasCompactNameMatch);
   
   return {
     verified,
@@ -261,50 +399,144 @@ function verifyPageContent(html, leadName, location) {
  * Query SearXNG API
  */
 async function searxngSearch(query, options = {}) {
-  const engines = options.engines || DEFAULT_ENGINES;
   const format = 'json';
-  
-  const url = new URL(SEARXNG_URL);
-  url.pathname = '/search';
-  url.searchParams.set('q', query);
-  url.searchParams.set('format', format);
-  url.searchParams.set('engines', engines.join(','));
-  
-  // Add language preference
-  url.searchParams.set('language', 'en');
-  
-  return new Promise((resolve, reject) => {
-    const client = url.protocol === 'https:' ? https : http;
-    
-    const req = client.get(url.toString(), { timeout: 15000 }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          resolve(json);
-        } catch (e) {
-          reject(new Error(`Failed to parse SearXNG response: ${e.message}`));
-        }
+
+  async function fetchConfig(baseUrl) {
+    const url = new URL(baseUrl);
+    url.pathname = '/config';
+
+    return new Promise((resolve, reject) => {
+      const client = url.protocol === 'https:' ? https : http;
+      const req = client.get(url.toString(), { timeout: 10000 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error(`Failed to parse SearXNG config from ${baseUrl}: ${e.message}`));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error(`SearXNG config timeout: ${baseUrl}`));
       });
     });
-    
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('SearXNG request timeout'));
+  }
+
+  async function getEnabledSearchEngines(baseUrl) {
+    if (options.engines && options.engines.length > 0) {
+      return options.engines;
+    }
+    if (DEFAULT_ENGINES.length > 0) {
+      return DEFAULT_ENGINES;
+    }
+    if (!searxngConfigCache) {
+      searxngConfigCache = await fetchConfig(baseUrl);
+    }
+
+    const engineProfile = normalizeEngineProfile(options.engineProfile);
+    const engineNames = (searxngConfigCache.engines || [])
+      .filter(engine => {
+        if (!engine.enabled || !Array.isArray(engine.categories)) return false;
+
+        const categories = new Set(engine.categories);
+        const hasDiscoveryCategory = categories.has('general') || categories.has('web');
+        if (!hasDiscoveryCategory) return false;
+
+        if (engineProfile === 'full-primary') {
+          return true;
+        }
+
+        const isImageOrVideoLane =
+          categories.has('images') ||
+          categories.has('videos') ||
+          categories.has('news') ||
+          /\.(images|videos|news)$/i.test(engine.name);
+
+        return !isImageOrVideoLane;
+      })
+      .map(engine => engine.name);
+
+    return [...new Set(engineNames)];
+  }
+
+  async function fetchFromEndpoint(baseUrl) {
+    const engines = await getEnabledSearchEngines(baseUrl);
+    const url = new URL(baseUrl);
+    url.pathname = '/search';
+    url.searchParams.set('q', query);
+    url.searchParams.set('format', format);
+    if (engines.length > 0) {
+      url.searchParams.set('engines', engines.join(','));
+    }
+    url.searchParams.set('language', 'en');
+
+    return new Promise((resolve, reject) => {
+      const client = url.protocol === 'https:' ? https : http;
+
+      const req = client.get(url.toString(), { timeout: 15000 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(json);
+          } catch (e) {
+            reject(new Error(`Failed to parse SearXNG response from ${baseUrl}: ${e.message}`));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error(`SearXNG request timeout: ${baseUrl}`));
+      });
     });
-  });
+  }
+
+  try {
+    return await fetchFromEndpoint(activeSearxngUrl);
+  } catch (error) {
+    const shouldFallbackLocal =
+      activeSearxngUrl !== LOCAL_SEARXNG_URL &&
+      /ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|timeout/i.test(error.message);
+
+    if (!shouldFallbackLocal) {
+      throw error;
+    }
+
+    console.error(`[SEARXNG] ${activeSearxngUrl} unavailable (${error.message}). Falling back to ${LOCAL_SEARXNG_URL}`);
+    activeSearxngUrl = LOCAL_SEARXNG_URL;
+    return fetchFromEndpoint(activeSearxngUrl);
+  }
 }
 
 /**
  * Score a search result (higher = better candidate for real business website)
  */
 function scoreResult(result, leadName, location) {
+  const leadIdentity = getNameVariants(leadName);
   let score = 0;
   const url = result.url || '';
   const title = result.title || '';
+  const snippet = result.content || '';
   const domain = extractDomain(url);
+  const domainNorm = normalizeDomain(domain);
+  const titleLower = title.toLowerCase();
+  const snippetLower = snippet.toLowerCase();
+  const nameParts = leadIdentity.parts;
+  const normalizedLeadName = normalizeAlphaNum(leadIdentity.stripped);
+  const acronym = leadIdentity.acronym.toLowerCase();
+  const coreAcronym = leadIdentity.coreAcronym.toLowerCase();
+  const tailWord = (leadIdentity.tailWord || '').toLowerCase();
+  const domainBase = domainNorm.replace(/\.(com|net|org|biz|us)$/i, '');
+  const titleCompact = normalizeAlphaNum(title);
+  const snippetCompact = normalizeAlphaNum(snippet);
   
   // Penalize directories heavily
   if (DIRECTORY_DOMAINS.some(d => domain.includes(d))) {
@@ -312,28 +544,48 @@ function scoreResult(result, leadName, location) {
   }
   
   // Reward if domain contains business name parts
-  const nameParts = leadName.toLowerCase().split(/\s+/).filter(p => p.length > 2);
   for (const part of nameParts) {
-    if (domain.toLowerCase().includes(part)) {
+    if (domainNorm.includes(part)) {
       score += 20;
     }
-    if (title.toLowerCase().includes(part)) {
+    if (titleLower.includes(part)) {
       score += 10;
     }
+    if (snippetLower.includes(part)) {
+      score += 6;
+    }
+  }
+
+  if (normalizedLeadName.length > 5 && domainNorm.replace(/\.(com|net|org|biz|us)$/i, '').includes(normalizedLeadName)) {
+    score += 45;
+  }
+  if (normalizedLeadName.length > 5 && titleCompact.includes(normalizedLeadName)) {
+    score += 25;
+  }
+  if (acronym.length >= 3) {
+    if (domainBase.includes(acronym)) {
+      score += 28;
+    }
+    if (titleLower.includes(acronym) || snippetLower.includes(acronym) || titleCompact.includes(acronym) || snippetCompact.includes(acronym)) {
+      score += 12;
+    }
+  }
+  if (coreAcronym.length >= 3 && tailWord && domainBase.includes(coreAcronym) && domainBase.includes(tailWord)) {
+    score += 42;
   }
   
   // Reward good signals in domain
   for (const signal of GOOD_SIGNALS) {
-    if (domain.toLowerCase().includes(signal)) {
+    if (domainNorm.includes(signal)) {
       score += 5;
     }
   }
   
   // Penalize obviously unrelated content
-  if (title.toLowerCase().includes('movie') || title.toLowerCase().includes('film')) {
+  if (titleLower.includes('movie') || titleLower.includes('film')) {
     score -= 30;
   }
-  if (title.toLowerCase().includes('song') || title.toLowerCase().includes('music')) {
+  if (titleLower.includes('song') || titleLower.includes('music')) {
     score -= 30;
   }
   
@@ -370,7 +622,7 @@ function scoreResult(result, leadName, location) {
                           leadName.toLowerCase().includes('bar');
   if (!isFoodBusiness) {
     for (const food of foodDomains) {
-      if (domain.includes(food) || title.toLowerCase().includes('recipe')) {
+      if (domain.includes(food) || titleLower.includes('recipe')) {
         score -= 30;
       }
     }
@@ -388,6 +640,52 @@ function scoreResult(result, leadName, location) {
         score -= 25;
       }
     }
+  }
+
+  const category = (result.category || '').toLowerCase();
+  const engine = (result.engine || '').toLowerCase();
+  const isMediaLane = category === 'images' || category === 'videos' || engine.includes('images') || engine.includes('videos');
+  const isCdnCandidate = isCdnLikeHost(domainNorm);
+  const isLikelyFirstParty =
+    (normalizedLeadName.length > 5 && domainBase.includes(normalizedLeadName)) ||
+    nameParts.filter(part => domainBase.includes(part)).length >= Math.min(2, Math.max(1, nameParts.length)) ||
+    (acronym.length >= 3 && domainBase.includes(acronym));
+  if (isCdnCandidate) {
+    score -= 120;
+  }
+  if (isMediaLane && !isLikelyFirstParty) {
+    score -= 40;
+  } else if (isMediaLane && isLikelyFirstParty) {
+    score -= 8;
+  }
+
+  const localTerms = [location?.city, location?.state].filter(Boolean).map(v => v.toLowerCase());
+  const localMatches = localTerms.filter(term => titleLower.includes(term) || snippetLower.includes(term) || domainNorm.includes(term));
+  if (localMatches.length > 0) {
+    score += 12 * localMatches.length;
+  }
+
+  if (nameParts.length > 0) {
+    const matchedIdentityParts = nameParts.filter(part => domainNorm.includes(part) || titleLower.includes(part) || snippetLower.includes(part));
+    if (matchedIdentityParts.length === 0) {
+      score -= 35;
+    } else if (matchedIdentityParts.length === 1 && nameParts.length > 1) {
+      score -= 10;
+      if (!domainBase.includes(normalizedLeadName) && !(coreAcronym.length >= 3 && tailWord && domainBase.includes(coreAcronym) && domainBase.includes(tailWord))) {
+        score -= 25;
+      }
+    }
+  }
+
+  if (domainBase && nameParts.length > 1) {
+    const exactSinglePartMatch = nameParts.some(part => domainBase === part);
+    if (exactSinglePartMatch) {
+      score -= 40;
+    }
+  }
+
+  if (LOCAL_SITE_HINTS.some(hint => titleLower.includes(hint) || url.toLowerCase().includes(`/${hint}`))) {
+    score += 8;
   }
   
   // Base score for having results
@@ -422,17 +720,17 @@ function extractDomain(url) {
  * Used when search engines fail to find the business
  */
 function guessDomains(leadName) {
+  const leadIdentity = getNameVariants(leadName);
   const domains = [];
   
   // Common TLDs to try
   const tlds = ['.com', '.net', '.org'];
   
   // Clean the name for domain usage
-  let base = leadName.toLowerCase()
+  let base = leadIdentity.normalized.toLowerCase()
     .replace(/[^a-z0-9\s]/g, '') // Remove special chars
     .replace(/\s+/g, '') // Remove spaces
     .replace(/^(the|a|an)/, ''); // Remove leading articles
-  
   // Strategy 1: Exact name as domain
   for (const tld of tlds) {
     domains.push(`${base}${tld}`);
@@ -458,21 +756,6 @@ function guessDomains(leadName) {
       for (const tld of tlds) {
         domains.push(`${cleaned}${tld}`);
       }
-    }
-  }
-  
-  // Strategy 3.5: For multi-word names, try first 1-2 words
-  const nameWords = base.match(/[a-z]+/g) || [];
-  if (nameWords.length >= 2) {
-    // First two words joined
-    for (const tld of tlds) {
-      domains.push(`${nameWords[0]}${nameWords[1]}${tld}`);
-    }
-  }
-  if (nameWords.length >= 3) {
-    // First word only (sometimes works for big brands)
-    for (const tld of tlds) {
-      domains.push(`${nameWords[0]}${tld}`);
     }
   }
   
@@ -521,12 +804,38 @@ function guessDomains(leadName) {
     }
   }
   
+  // Strategy 3.5: For multi-word names, try first 1-2 words
+  const nameWords = base.match(/[a-z]+/g) || [];
+  if (nameWords.length >= 2) {
+    // First two words joined
+    for (const tld of tlds) {
+      domains.push(`${nameWords[0]}${nameWords[1]}${tld}`);
+    }
+  }
+  if (nameWords.length >= 3) {
+    // First word only (sometimes works for big brands)
+    for (const tld of tlds) {
+      domains.push(`${nameWords[0]}${tld}`);
+    }
+  }
+  
   // Strategy 5: Try name parts (first word + second word)
   const words = base.split(/(?=[A-Z])|[\s]+/).filter(w => w.length > 2);
   if (words.length >= 2) {
     // First two words joined
     for (const tld of tlds) {
       domains.push(`${words[0]}${words[1]}${tld}`);
+    }
+  }
+
+  if (leadIdentity.coreAcronym.length >= 3 && leadIdentity.tailWord) {
+    for (const tld of tlds) {
+      domains.push(`${leadIdentity.coreAcronym.toLowerCase()}${leadIdentity.tailWord.toLowerCase()}${tld}`);
+      domains.push(`${leadIdentity.coreAcronym.toLowerCase()}-${leadIdentity.tailWord.toLowerCase()}${tld}`);
+    }
+  } else if (leadIdentity.acronym.length >= 3 && words.length > 0) {
+    for (const tld of tlds) {
+      domains.push(`${leadIdentity.acronym.toLowerCase()}${words[words.length - 1]}${tld}`);
     }
   }
   
@@ -659,49 +968,81 @@ function detectIndustry(businessName) {
  * Try multiple query combinations until we find a match
  */
 function buildQueries(leadName, location = {}) {
+  const leadIdentity = getNameVariants(leadName);
   const queries = [];
   const city = location.city || '';
   const state = location.state || 'TX';
-  const zip = location.zip || '';
   const industries = detectIndustry(leadName);
+  const strippedName = leadIdentity.stripped;
+  const compactName = leadIdentity.parts.join(' ');
+  const acronym = leadIdentity.acronym;
+  const coreAcronym = leadIdentity.coreAcronym;
+  const tailWord = leadIdentity.tailWord;
+  const addQuery = (query) => {
+    const trimmed = (query || '').trim().replace(/\s+/g, ' ');
+    if (trimmed && !queries.includes(trimmed)) {
+      queries.push(trimmed);
+    }
+  };
   
   // Strategy 1: Exact business name + location + industry
   if (city && industries.length > 0) {
-    queries.push(`"${leadName}" ${city} ${state} ${industries[0]}`);
+    addQuery(`"${leadName}" ${city} ${state} ${industries[0]}`);
   }
   if (city) {
-    queries.push(`"${leadName}" ${city} ${state}`);
+    addQuery(`"${leadName}" ${city} ${state}`);
   }
   
   // Strategy 2: Business name + state + industry
   if (industries.length > 0) {
-    queries.push(`"${leadName}" ${state} ${industries[0]}`);
+    addQuery(`"${leadName}" ${state} ${industries[0]}`);
   }
-  queries.push(`"${leadName}" ${state}`);
+  addQuery(`"${leadName}" ${state}`);
   
   // Strategy 3: Business name with industry context (no location)
   if (industries.length > 0) {
-    queries.push(`"${leadName}" ${industries[0]}`);
+    addQuery(`"${leadName}" ${industries[0]}`);
   }
   
   // Strategy 4: Business name only (for unique names)
-  queries.push(`"${leadName}"`);
+  addQuery(`"${leadName}"`);
+  if (strippedName !== leadName) {
+    addQuery(`"${strippedName}" ${city} ${state}`.trim());
+    addQuery(`"${strippedName}"`);
+  }
   
   // Strategy 5: Business name + official/local keywords
-  queries.push(`"${leadName}" official website`);
+  addQuery(`"${leadName}" official website`);
   if (city) {
-    queries.push(`"${leadName}" ${city} Texas business`);
+    addQuery(`"${leadName}" ${city} Texas business`);
+    addQuery(`${strippedName} ${city} ${state} contact`);
   }
   
   // Strategy 6: Fallback without quotes (broader search)
   if (city) {
-    queries.push(`${leadName} ${city} ${industries[0] || ''}`.trim());
+    addQuery(`${leadName} ${city} ${industries[0] || ''}`.trim());
+    addQuery(`${leadName} ${city} ${state} company`);
+    addQuery(`${leadName} ${city} ${state} services`);
+  }
+  addQuery(`${strippedName} ${state} ${industries[0] || ''}`.trim());
+  addQuery(`${strippedName} ${state} company`);
+  addQuery(`${strippedName} ${state} contact`);
+  if (compactName && compactName !== strippedName.toLowerCase()) {
+    addQuery(`${compactName} ${city} ${state}`.trim());
+  }
+  if (acronym.length >= 3) {
+    addQuery(`${acronym} ${city} ${state}`.trim());
+    addQuery(`${acronym} ${industries[0] || ''} ${state}`.trim());
+  }
+  if (coreAcronym.length >= 3 && tailWord) {
+    addQuery(`${coreAcronym} ${tailWord} ${city} ${state}`.trim());
+    addQuery(`${coreAcronym}${tailWord} ${state}`.trim());
   }
   
   // Strategy 7: For numbered names, try the likely domain name
   const guessedDomains = guessDomains(leadName);
   for (const domain of guessedDomains.slice(0, 3)) {
-    queries.push(domain.replace(/\.(com|net|org)$/, '')); // Search for domain without TLD
+    addQuery(domain.replace(/\.(com|net|org)$/, '')); // Search for domain without TLD
   }
   
   return queries;
@@ -711,9 +1052,10 @@ function buildQueries(leadName, location = {}) {
  * Search for a lead's website
  */
 async function searchLead(leadName, location = {}, options = {}) {
-  const queries = buildQueries(leadName, location);
+  const normalizedLeadName = normalizeLeadNameForSearch(leadName);
+  const queries = buildQueries(normalizedLeadName, location);
   const results = [];
-  const maxQueries = options.maxQueries || 3;
+  const maxQueries = options.maxQueries || 8;
   const minScore = options.minScore || 15;
   
   for (let i = 0; i < Math.min(maxQueries, queries.length); i++) {
@@ -727,7 +1069,7 @@ async function searchLead(leadName, location = {}, options = {}) {
         const scored = response.results
           .map(r => ({
             ...r,
-            score: scoreResult(r, leadName, location),
+            score: scoreResult(r, normalizedLeadName, location),
             domain: extractDomain(r.url),
             query: query
           }))
@@ -737,7 +1079,8 @@ async function searchLead(leadName, location = {}, options = {}) {
         results.push(...scored);
         
         // If we found a high-quality result, stop searching
-        if (scored.length > 0 && scored[0].score >= 40) {
+        if (i >= 2 && scored.length > 0 && scored[0].score >= 65 &&
+            !BAD_SIGNALS.some(bad => (scored[0].domain || '').toLowerCase().includes(bad))) {
           break;
         }
       }
@@ -753,7 +1096,7 @@ async function searchLead(leadName, location = {}, options = {}) {
   
   // FALLBACK: Domain probing for numbered/obscure businesses
   // If search engines didn't find good results OR no results verified, try probing likely domains directly
-  const guessedDomains = guessDomains(leadName);
+  const guessedDomains = guessDomains(normalizedLeadName);
   
   // Check if any result contains bad signals (forums, dictionaries, etc.)
   const hasBadResults = results.some(r => 
@@ -767,7 +1110,7 @@ async function searchLead(leadName, location = {}, options = {}) {
     
     for (const domain of guessedDomains.slice(0, 5)) {
       try {
-        const probe = await probeDomain(domain, leadName, location);
+        const probe = await probeDomain(domain, normalizedLeadName, location);
         if (probe.found) {
           console.error(`[FALLBACK] Domain probe hit: ${domain}`);
           results.push({
@@ -804,7 +1147,7 @@ async function searchLead(leadName, location = {}, options = {}) {
   if (options.verify !== false && topCandidates.length > 0) {
     for (const candidate of topCandidates) {
       try {
-        const verification = await verifyCandidate(candidate.url, leadName, location);
+        const verification = await verifyCandidate(candidate.url, normalizedLeadName, location);
         candidate.verification = verification;
         candidate.verifiedScore = candidate.score + verification.score;
         candidate.verified = verification.verified;
@@ -830,7 +1173,7 @@ async function searchLead(leadName, location = {}, options = {}) {
       if (seenDomains.has(normalizeDomain(domain))) continue;
       
       try {
-        const probe = await probeDomain(domain, leadName, location);
+        const probe = await probeDomain(domain, normalizedLeadName, location);
         if (probe.found) {
           console.error(`[FALLBACK-2] Domain probe hit: ${domain}`);
           const newCandidate = {
@@ -860,8 +1203,9 @@ async function searchLead(leadName, location = {}, options = {}) {
     : unique.slice(0, 10);
   
   return {
-    leadName,
+    leadName: normalizedLeadName,
     location,
+    engineProfile: normalizeEngineProfile(options.engineProfile),
     queriesAttempted: Math.min(maxQueries, queries.length),
     totalResults: results.length,
     verifiedCount: verifiedCandidates.length,
@@ -956,8 +1300,9 @@ async function main() {
     if (location.city) console.log(`Location: ${location.city}, ${location.state}`);
     
     const result = await searchLead(leadName, location, {
-      maxQueries: args.maxQueries ? parseInt(args.maxQueries) : 3,
-      minScore: args.minScore ? parseInt(args.minScore) : 15
+      maxQueries: args.maxQueries ? parseInt(args.maxQueries) : 8,
+      minScore: args.minScore ? parseInt(args.minScore) : 15,
+      engineProfile: args['engine-profile'] || DEFAULT_ENGINE_PROFILE
     });
     
     console.log('\n=== RESULTS ===');
@@ -1002,7 +1347,9 @@ async function main() {
     console.log(`Location: ${lead.location.city || 'N/A'}, ${lead.location.state}`);
     console.log(`Address: ${lead.location.fullAddress || 'N/A'}`);
     
-    const result = await searchLead(lead.cleanName, lead.location);
+    const result = await searchLead(lead.cleanName, lead.location, {
+      engineProfile: args['engine-profile'] || DEFAULT_ENGINE_PROFILE
+    });
     
     console.log('\n=== RESULTS ===');
     console.log(`Status: ${result.status}`);
@@ -1050,7 +1397,8 @@ async function main() {
         const lead = loadLeadFromDB(dbPath, leadId);
         const searchResult = await searchLead(lead.cleanName, lead.location, {
           maxQueries: 2,  // Faster for batch
-          minScore: 20    // Higher threshold for batch
+          minScore: 20,   // Higher threshold for batch
+          engineProfile: args['engine-profile'] || DEFAULT_ENGINE_PROFILE
         });
         
         results.push({
@@ -1107,8 +1455,9 @@ Options:
   --batch      Run batch search on multiple leads
   --limit      Number of leads for batch (default: 10)
   --status     Filter by status for batch (default: research)
-  --max-queries  Max search queries per lead (default: 3)
+  --max-queries  Max search queries per lead (default: 8)
   --min-score    Minimum score threshold (default: 15)
+  --engine-profile Engine pool: text-primary or full-primary
   --json       Output full JSON result
 
 Environment:

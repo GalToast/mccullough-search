@@ -12,7 +12,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 // Parse args
 const args = process.argv.slice(2).reduce((acc, arg) => {
@@ -25,6 +27,7 @@ const args = process.argv.slice(2).reduce((acc, arg) => {
 
 const SEARXNG_URL = process.env.SEARXNG_URL || 'http://127.0.0.1:8889';
 const SCRIPT_PATH = path.join(__dirname, 'search-lead.js');
+const ENGINE_PROFILES = ['text-primary', 'full-primary'];
 
 // Ground truth file format: [{ leadId, name, city, state, expectedWebsite, expectedDomain }]
 let testCases = [];
@@ -77,136 +80,186 @@ console.log(`LEAD SEARCH TEST HARNESS`);
 console.log(`========================================`);
 console.log(`Test cases: ${testCases.length}`);
 console.log(`SearXNG: ${SEARXNG_URL}`);
+if (args['compare-engine-profiles']) {
+  console.log(`Engine profile comparison: ${ENGINE_PROFILES.join(' vs ')}`);
+}
 console.log(`\n`);
 
-// Run tests
-const results = [];
-let hits = 0;
-let misses = 0;
-let pending = 0;
+function buildArgs(test, engineProfile) {
+  const cmdArgs = [SCRIPT_PATH, '--lead', test.name];
+  if (test.city) cmdArgs.push('--city', test.city);
+  if (test.state) cmdArgs.push('--state', test.state);
+  cmdArgs.push('--min-score', '10', '--engine-profile', engineProfile, '--json');
+  return cmdArgs;
+}
 
-for (const test of testCases) {
-  console.log(`\n----------------------------------------`);
-  console.log(`Testing: ${test.name} (Lead ${test.leadId})`);
-  console.log(`Expected: ${test.expectedDomain}`);
-  console.log(`----------------------------------------`);
-  
-  // Build command
-  const cmdParts = ['node', SCRIPT_PATH, '--lead', `"${test.name}"`];
-  if (test.city) cmdParts.push('--city', test.city);
-  if (test.state) cmdParts.push('--state', test.state);
-  cmdParts.push('--min-score', '10', '--json');
-  
-  const cmd = cmdParts.join(' ');
-  
+async function runSingleTest(test, engineProfile) {
+  const cmdArgs = buildArgs(test, engineProfile);
+
   try {
-    const output = execSync(cmd, { encoding: 'utf8', timeout: 60000 });
-    
-    // Parse JSON from output (it's after "=== JSON OUTPUT ===" marker)
+    const { stdout, stderr } = await execFileAsync('node', cmdArgs, {
+      encoding: 'utf8',
+      timeout: 60000,
+      cwd: __dirname,
+      env: process.env,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const output = `${stdout || ''}${stderr || ''}`;
     const jsonMatch = output.match(/=== JSON OUTPUT ===\s*(\{[\s\S]*\})/);
     if (jsonMatch) {
       const result = JSON.parse(jsonMatch[1]);
-      
-      // Check if best match domain matches expected
       const bestMatch = result.bestMatch;
       const foundDomain = bestMatch?.domain?.toLowerCase().replace(/^www\./, '') || 'none';
       const verified = bestMatch?.verification?.verified || false;
-      
-      // Normalize expected domain too
       const expectedNorm = test.expectedDomain.toLowerCase().replace(/^www\./, '');
-      
-      // Determine if it's a hit
-      let isHit = false;
       let verdict = '';
-      
+
       if (foundDomain === expectedNorm) {
-        isHit = true;
         verdict = 'HIT';
-        hits++;
       } else if (verified) {
-        // Verified but wrong domain - need manual check
         verdict = 'WRONG_BUT_VERIFIED';
-        pending++;
       } else {
         verdict = 'MISS';
-        misses++;
       }
-      
-      console.log(`Found: ${foundDomain}`);
-      console.log(`Verified: ${verified}`);
-      console.log(`Verdict: ${verdict}`);
-      
-      results.push({
+
+      return {
         leadId: test.leadId,
         name: test.name,
+        engineProfile,
         expectedDomain: test.expectedDomain,
         foundDomain,
         verified,
         verdict,
+        bestMatchScore: bestMatch?.score ?? null,
+        totalResults: result.totalResults,
         candidates: result.candidates?.slice(0, 3).map(c => ({
           domain: c.domain,
           score: c.score,
-          verified: c.verification?.verified
-        }))
-      });
-      
-    } else {
-      console.log(`No JSON output found`);
-      console.log(output.slice(0, 500));
-      misses++;
-      results.push({
-        leadId: test.leadId,
-        name: test.name,
-        expectedDomain: test.expectedDomain,
-        foundDomain: 'parse_error',
-        verified: false,
-        verdict: 'ERROR'
-      });
+          verified: c.verification?.verified,
+          engine: c.engine,
+          category: c.category
+        })) || []
+      };
     }
-  } catch (e) {
-    console.log(`Error: ${e.message}`);
-    misses++;
-    results.push({
+
+    return {
       leadId: test.leadId,
       name: test.name,
+      engineProfile,
+      expectedDomain: test.expectedDomain,
+      foundDomain: 'parse_error',
+      verified: false,
+      verdict: 'ERROR',
+      error: output.slice(0, 500)
+    };
+  } catch (e) {
+    return {
+      leadId: test.leadId,
+      name: test.name,
+      engineProfile,
       expectedDomain: test.expectedDomain,
       foundDomain: 'error',
       verified: false,
       verdict: 'ERROR',
       error: e.message
-    });
+    };
   }
 }
 
-// Summary
-console.log(`\n========================================`);
-console.log(`SUMMARY`);
-console.log(`========================================`);
-console.log(`Hits: ${hits}`);
-console.log(`Misses: ${misses}`);
-console.log(`Pending (need manual verification): ${pending}`);
-console.log(`Hit Rate: ${testCases.length > 0 ? ((hits / testCases.length) * 100).toFixed(1) : 0}%`);
-console.log(`\n`);
-
-// Output results JSON for manual verification queue
-const outputPath = path.join(__dirname, 'test-results.json');
-fs.writeFileSync(outputPath, JSON.stringify({
-  timestamp: new Date().toISOString(),
-  totalTests: testCases.length,
-  hits,
-  misses,
-  pending,
-  hitRate: testCases.length > 0 ? (hits / testCases.length) : 0,
-  results
-}, null, 2));
-
-console.log(`Results saved to: ${outputPath}`);
-
-// Generate verification queue for manual inspection
-const verificationQueue = results.filter(r => r.verdict !== 'HIT');
-if (verificationQueue.length > 0) {
-  const queuePath = path.join(__dirname, 'verification-queue.json');
-  fs.writeFileSync(queuePath, JSON.stringify(verificationQueue, null, 2));
-  console.log(`\nVerification queue saved to: ${queuePath}`);
-  console.log(`Items requiring manual verification: ${verificationQueue.length}`);
+function summarize(results) {
+  const hits = results.filter(r => r.verdict === 'HIT').length;
+  const pending = results.filter(r => r.verdict === 'WRONG_BUT_VERIFIED').length;
+  const misses = results.length - hits - pending;
+  return {
+    hits,
+    misses,
+    pending,
+    hitRate: results.length > 0 ? (hits / results.length) : 0
+  };
 }
+
+async function runWithConcurrency(tasks, concurrency) {
+  const results = new Array(tasks.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const current = nextIndex;
+      nextIndex += 1;
+      if (current >= tasks.length) return;
+      results[current] = await tasks[current]();
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, tasks.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+async function main() {
+  const compareProfiles = Boolean(args['compare-engine-profiles']);
+  const profilesToRun = compareProfiles ? ENGINE_PROFILES : [args['engine-profile'] || 'text-primary'];
+  const concurrency = Math.max(1, parseInt(args.concurrency || (compareProfiles ? 4 : 2), 10));
+  console.log(`Concurrency: ${concurrency}`);
+
+  const taskDescriptors = [];
+  for (const test of testCases) {
+    for (const engineProfile of profilesToRun) {
+      taskDescriptors.push({ test, engineProfile });
+    }
+  }
+
+  const results = await runWithConcurrency(
+    taskDescriptors.map(({ test, engineProfile }) => async () => {
+      const result = await runSingleTest(test, engineProfile);
+      console.log(`\n----------------------------------------`);
+      console.log(`Testing: ${test.name} (Lead ${test.leadId})`);
+      console.log(`Expected: ${test.expectedDomain}`);
+      console.log(`Profile: ${engineProfile}`);
+      console.log(`Found: ${result.foundDomain}`);
+      console.log(`Verified: ${result.verified}`);
+      console.log(`Verdict: ${result.verdict}`);
+      if (result.bestMatchScore != null) {
+        console.log(`Score: ${result.bestMatchScore}`);
+      }
+      return result;
+    }),
+    concurrency
+  );
+
+  console.log(`\n========================================`);
+  console.log(`SUMMARY`);
+  console.log(`========================================`);
+  const summaries = {};
+  for (const engineProfile of profilesToRun) {
+    summaries[engineProfile] = summarize(results.filter(r => r.engineProfile === engineProfile));
+    console.log(`${engineProfile}: ${summaries[engineProfile].hits} hits, ${summaries[engineProfile].misses} misses, ${summaries[engineProfile].pending} pending, hit rate ${(summaries[engineProfile].hitRate * 100).toFixed(1)}%`);
+  }
+  console.log(`\n`);
+
+  const outputPath = path.join(__dirname, 'test-results.json');
+  fs.writeFileSync(outputPath, JSON.stringify({
+    timestamp: new Date().toISOString(),
+    totalTests: testCases.length,
+    compareProfiles,
+    profiles: profilesToRun,
+    concurrency,
+    summaries,
+    results
+  }, null, 2));
+
+  console.log(`Results saved to: ${outputPath}`);
+
+  const verificationQueue = results.filter(r => r.verdict !== 'HIT');
+  if (verificationQueue.length > 0) {
+    const queuePath = path.join(__dirname, 'verification-queue.json');
+    fs.writeFileSync(queuePath, JSON.stringify(verificationQueue, null, 2));
+    console.log(`\nVerification queue saved to: ${queuePath}`);
+    console.log(`Items requiring manual verification: ${verificationQueue.length}`);
+  }
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exit(1);
+});

@@ -3,10 +3,19 @@ name: Search Lead
 on:
   workflow_dispatch:
     inputs:
+      run_mode:
+        description: 'single-lead or compare-ground-truth'
+        required: true
+        type: choice
+        default: compare-ground-truth
+        options:
+          - compare-ground-truth
+          - single-lead
       lead_name:
         description: 'Business name to search'
-        required: true
+        required: false
         type: string
+        default: ''
       city:
         description: 'City for location context'
         required: false
@@ -26,12 +35,35 @@ on:
         description: 'Max search queries per lead'
         required: false
         type: number
-        default: 3
+        default: 8
       min_score:
         description: 'Minimum score threshold'
         required: false
         type: number
         default: 15
+      engine_profile:
+        description: 'Engine profile for single-lead runs'
+        required: false
+        type: choice
+        default: full-primary
+        options:
+          - full-primary
+          - text-primary
+      compare_engine_profiles:
+        description: 'Compare text-primary vs full-primary in compare mode'
+        required: false
+        type: boolean
+        default: true
+      ground_truth_file:
+        description: 'Ground truth file for compare mode'
+        required: false
+        type: string
+        default: './ground-truth-fresh.json'
+      concurrency:
+        description: 'Parallel workers for compare mode'
+        required: false
+        type: number
+        default: 4
 
 jobs:
   search:
@@ -76,21 +108,47 @@ jobs:
         env:
           SEARXNG_URL: http://localhost:8888
         run: |
-          node search-lead.js \
-            --lead "${{ inputs.lead_name }}" \
-            --city "${{ inputs.city }}" \
-            --state "${{ inputs.state }}" \
-            --zip "${{ inputs.zip_code }}" \
-            --max-queries ${{ inputs.max_queries }} \
-            --min-score ${{ inputs.min_score }} \
-            --json > search-result.json
-          
-          echo "=== SEARCH RESULT ==="
-          cat search-result.json
+          set -euo pipefail
+
+          if [ "${{ inputs.run_mode }}" = "compare-ground-truth" ]; then
+            if [ "${{ inputs.compare_engine_profiles }}" = "true" ]; then
+              node test-harness.js \
+                --ground-truth="${{ inputs.ground_truth_file }}" \
+                --compare-engine-profiles \
+                --concurrency="${{ inputs.concurrency }}"
+            else
+              node test-harness.js \
+                --ground-truth="${{ inputs.ground_truth_file }}" \
+                --engine-profile="${{ inputs.engine_profile }}" \
+                --concurrency="${{ inputs.concurrency }}"
+            fi
+
+            echo "=== TEST RESULTS ==="
+            cat test-results.json
+            echo "=== VERIFICATION QUEUE ==="
+            cat verification-queue.json
+          else
+            node search-lead.js \
+              --lead "${{ inputs.lead_name }}" \
+              --city "${{ inputs.city }}" \
+              --state "${{ inputs.state }}" \
+              --zip "${{ inputs.zip_code }}" \
+              --max-queries ${{ inputs.max_queries }} \
+              --min-score ${{ inputs.min_score }} \
+              --engine-profile "${{ inputs.engine_profile }}" \
+              --json > search-result.json
+
+            echo "=== SEARCH RESULT ==="
+            cat search-result.json
+          fi
       
-      - name: Upload result
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: search-result
-          path: search-result.json
+          name: search-artifacts
+          path: |
+            search-result.json
+            test-results.json
+            verification-queue.json
+            ground-truth-fresh.json
           retention-days: 1
