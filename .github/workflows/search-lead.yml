@@ -69,20 +69,6 @@ jobs:
   search:
     runs-on: ubuntu-latest
     
-    services:
-      searxng:
-        image: searxng/searxng:latest
-        ports:
-          - 8888:8080
-        env:
-          SEARXNG_BASE_URL: http://localhost:8080/
-          SEARXNG_SECRET: ${{ secrets.SEARXNG_SECRET }}
-        options: >-
-          --health-cmd "curl -f http://localhost:8080/ || exit 1"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 3
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,17 +78,27 @@ jobs:
         with:
           node-version: '20'
       
+      - name: Start SearXNG
+        run: |
+          docker run -d --name searxng-ci \
+            -p 8888:8080 \
+            -e SEARXNG_BASE_URL=http://localhost:8080/ \
+            -e SEARXNG_SECRET="${{ secrets.SEARXNG_SECRET }}" \
+            searxng/searxng:latest
+
       - name: Wait for SearXNG
         run: |
-          echo "Waiting for SearXNG to be ready..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8888/ > /dev/null; then
+          echo "Waiting for SearXNG to answer /config..."
+          for i in {1..45}; do
+            if curl -fsS http://localhost:8888/config > /dev/null; then
               echo "SearXNG is ready!"
               break
             fi
-            echo "Waiting... ($i/30)"
-            sleep 2
+            echo "Waiting... ($i/45)"
+            sleep 3
           done
+
+          curl -fsS http://localhost:8888/config > /dev/null
       
       - name: Run search
         env:
@@ -143,6 +139,7 @@ jobs:
           fi
       
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: search-artifacts
@@ -151,4 +148,13 @@ jobs:
             test-results.json
             verification-queue.json
             ground-truth-fresh.json
+          if-no-files-found: ignore
           retention-days: 1
+
+      - name: Dump SearXNG logs
+        if: always()
+        run: docker logs searxng-ci || true
+
+      - name: Stop SearXNG
+        if: always()
+        run: docker rm -f searxng-ci || true
