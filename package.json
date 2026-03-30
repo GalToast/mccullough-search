@@ -1,0 +1,13 @@
+{
+  "name": "mccullough-search",
+  "version": "1.0.0",
+  "description": "Lead website discovery via SearXNG",
+  "main": "search-lead.js",
+  "scripts": {
+    "search": "node search-lead.js",
+    "batch": "node search-lead.js --batch"
+  },
+  "keywords": ["lead", "search", "searxng", "website-discovery"],
+  "author": "McCullough Digital",
+  "license": "MIT"
+}
