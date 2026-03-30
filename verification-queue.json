@@ -1,0 +1,22 @@
+[
+  {
+    "leadId": 3,
+    "name": "Northern Tool and Equipment",
+    "expectedDomain": "northerntool.com",
+    "foundDomain": "city-data.com",
+    "verified": false,
+    "verdict": "MISS",
+    "candidates": [
+      {
+        "domain": "www.city-data.com",
+        "score": 26,
+        "verified": false
+      },
+      {
+        "domain": "civilwartalk.com",
+        "score": 16,
+        "verified": false
+      }
+    ]
+  }
+]

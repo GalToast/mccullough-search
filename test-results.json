@@ -1,0 +1,125 @@
+{
+  "timestamp": "2026-03-30T14:51:43.124Z",
+  "totalTests": 6,
+  "hits": 5,
+  "misses": 1,
+  "pending": 0,
+  "hitRate": 0.8333333333333334,
+  "results": [
+    {
+      "leadId": 9,
+      "name": "105 SPEEDWAY",
+      "expectedDomain": "105speedwayracing.com",
+      "foundDomain": "105speedwayracing.com",
+      "verified": true,
+      "verdict": "HIT",
+      "candidates": [
+        {
+          "domain": "105speedwayracing.com",
+          "score": 50,
+          "verified": true
+        }
+      ]
+    },
+    {
+      "leadId": 22,
+      "name": "Good Charlie's Oyster Bar",
+      "expectedDomain": "goodcharlies.com",
+      "foundDomain": "goodcharlies.com",
+      "verified": false,
+      "verdict": "HIT",
+      "candidates": [
+        {
+          "domain": "goodcharlies.com",
+          "score": 44,
+          "verified": false
+        }
+      ]
+    },
+    {
+      "leadId": 3,
+      "name": "Northern Tool and Equipment",
+      "expectedDomain": "northerntool.com",
+      "foundDomain": "city-data.com",
+      "verified": false,
+      "verdict": "MISS",
+      "candidates": [
+        {
+          "domain": "www.city-data.com",
+          "score": 26,
+          "verified": false
+        },
+        {
+          "domain": "civilwartalk.com",
+          "score": 16,
+          "verified": false
+        }
+      ]
+    },
+    {
+      "leadId": 1,
+      "name": "1845 SOLUTIONS",
+      "expectedDomain": "1845solutions.com",
+      "foundDomain": "1845solutions.com",
+      "verified": false,
+      "verdict": "HIT",
+      "candidates": [
+        {
+          "domain": "1845solutions.com",
+          "score": 50,
+          "verified": false
+        },
+        {
+          "domain": "1845distillingcompany.com",
+          "score": 41,
+          "verified": false
+        },
+        {
+          "domain": "www.civico1845.com",
+          "score": 36,
+          "verified": false
+        }
+      ]
+    },
+    {
+      "leadId": 10,
+      "name": "1097 WATER SPORTS INC.",
+      "expectedDomain": "1097watersports.com",
+      "foundDomain": "1097watersports.com",
+      "verified": false,
+      "verdict": "HIT",
+      "candidates": [
+        {
+          "domain": "1097watersports.com",
+          "score": 45,
+          "verified": false
+        },
+        {
+          "domain": "www.onthisday.com",
+          "score": 16,
+          "verified": false
+        },
+        {
+          "domain": "accountably.com",
+          "score": 16,
+          "verified": false
+        }
+      ]
+    },
+    {
+      "leadId": 12,
+      "name": "12 Acre Woods RV Park, LLC",
+      "expectedDomain": "12acrewoodsrvpark.com",
+      "foundDomain": "12acrewoodsrvpark.com",
+      "verified": false,
+      "verdict": "HIT",
+      "candidates": [
+        {
+          "domain": "12acrewoodsrvpark.com",
+          "score": 50,
+          "verified": false
+        }
+      ]
+    }
+  ]
+}
