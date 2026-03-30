@@ -18,8 +18,9 @@ const path = require('path');
 // SearXNG endpoint (localhost for dev, will be docker in GitHub Actions)
 const SEARXNG_URL = process.env.SEARXNG_URL || 'http://127.0.0.1:8889';
 
-// Search engines to use (weighted for quality)
-const DEFAULT_ENGINES = ['google', 'bing', 'duckduckgo', 'mojeek'];
+// Search engines to use - use all available for best local business coverage
+// The websearch backend uses all engines and returns the best results
+const DEFAULT_ENGINES = ['brave', 'google', 'bing', 'duckduckgo', 'startpage', 'qwant'];
 
 // Business directory domains to deprioritize (not real websites)
 const DIRECTORY_DOMAINS = [

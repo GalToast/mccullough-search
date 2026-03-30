@@ -1,23 +1,33 @@
 {
-  "timestamp": "2026-03-30T14:51:43.124Z",
+  "timestamp": "2026-03-30T15:25:23.026Z",
   "totalTests": 6,
-  "hits": 5,
-  "misses": 1,
+  "hits": 6,
+  "misses": 0,
   "pending": 0,
-  "hitRate": 0.8333333333333334,
+  "hitRate": 1,
   "results": [
     {
       "leadId": 9,
       "name": "105 SPEEDWAY",
       "expectedDomain": "105speedwayracing.com",
       "foundDomain": "105speedwayracing.com",
-      "verified": true,
+      "verified": false,
       "verdict": "HIT",
       "candidates": [
         {
           "domain": "105speedwayracing.com",
-          "score": 50,
-          "verified": true
+          "score": 46,
+          "verified": false
+        },
+        {
+          "domain": "y105music.com",
+          "score": 36,
+          "verified": false
+        },
+        {
+          "domain": "www.love105fm.com",
+          "score": 36,
+          "verified": false
         }
       ]
     },
@@ -26,13 +36,13 @@
       "name": "Good Charlie's Oyster Bar",
       "expectedDomain": "goodcharlies.com",
       "foundDomain": "goodcharlies.com",
-      "verified": false,
+      "verified": true,
       "verdict": "HIT",
       "candidates": [
         {
           "domain": "goodcharlies.com",
           "score": 44,
-          "verified": false
+          "verified": true
         }
       ]
     },
@@ -40,18 +50,23 @@
       "leadId": 3,
       "name": "Northern Tool and Equipment",
       "expectedDomain": "northerntool.com",
-      "foundDomain": "city-data.com",
+      "foundDomain": "northerntool.com",
       "verified": false,
-      "verdict": "MISS",
+      "verdict": "HIT",
       "candidates": [
         {
-          "domain": "www.city-data.com",
-          "score": 26,
+          "domain": "www.northerntool.com",
+          "score": 76,
           "verified": false
         },
         {
-          "domain": "civilwartalk.com",
-          "score": 16,
+          "domain": "catalog.northerntool.com",
+          "score": 76,
+          "verified": false
+        },
+        {
+          "domain": "www.city-data.com",
+          "score": 26,
           "verified": false
         }
       ]
@@ -70,13 +85,13 @@
           "verified": false
         },
         {
-          "domain": "1845distillingcompany.com",
-          "score": 41,
+          "domain": "www.onthisday.com",
+          "score": 16,
           "verified": false
         },
         {
-          "domain": "www.civico1845.com",
-          "score": 36,
+          "domain": "www.history.com",
+          "score": 16,
           "verified": false
         }
       ]
