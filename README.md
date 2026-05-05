@@ -54,14 +54,18 @@ Or via GitHub UI: Actions → Search Lead → Run workflow
 ### Test Harness
 
 ```bash
-node test-harness.js --ground-truth ground-truth-fresh.json
+node test-harness.js --ground-truth examples/ground-truth.sample.json
 ```
 
-The harness compares search output against known domains and writes review artifacts such as `test-results.json` and `verification-queue.json`.
+The harness compares search output against known domains and writes local review artifacts such as `test-results.json` and `verification-queue.json`. Checked-in sample outputs live under `examples/`.
 
 ## Environment
 
 - `SEARXNG_URL`: SearXNG endpoint (default: `http://127.0.0.1:8889`)
+
+## Current Limits
+
+Local-business website discovery is intentionally treated as a review problem, not a solved classification problem. Common business names, directory-heavy results, and businesses without strong web presence can produce misses or ambiguous candidates. The repo keeps those cases visible through review queues so downstream review can decide whether to research further, audit a candidate site, or mark the lead as no-site-found.
 
 ## Scoring Signals
 
@@ -79,8 +83,9 @@ Minimum score threshold: 15 (default)
 - `search-lead.js` - Search, scoring, verification, JSON output, and batch mode
 - `test-harness.js` - Ground-truth validation and hit-rate reporting
 - `run-search-gh.ps1` - PowerShell runner for GitHub Actions
-- `ground-truth-fresh.json` - Known-answer dataset for validation
-- `verification-queue.json` - Ambiguous or missed cases queued for review
+- `examples/ground-truth.sample.json` - Known-answer sample dataset for validation
+- `examples/test-results.sample.json` - Example harness output
+- `examples/verification-queue.sample.json` - Example ambiguous or missed cases queued for review
 - `.github/workflows/search-lead.yml` - GitHub workflow with SearXNG container
 
 ## Why It Matters

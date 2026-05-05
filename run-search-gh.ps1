@@ -44,14 +44,14 @@ param(
     [ValidateSet("full-primary", "text-primary")]
     [string]$EngineProfile = "full-primary",
     [bool]$CompareEngineProfiles = $true,
-    [string]$GroundTruthFile = "./ground-truth-fresh.json",
+    [string]$GroundTruthFile = "./examples/ground-truth.sample.json",
     [int]$Concurrency = 4,
     [string]$Repo = "GalToast/mccullough-search"
 )
 
 # Colors
-function Write-Step { Write-Host "`n► $args" -ForegroundColor Cyan }
-function Write-Success { Write-Host "  ✓ $args" -ForegroundColor Green }
+function Write-Step { Write-Host "`n==> $args" -ForegroundColor Cyan }
+function Write-Success { Write-Host "  OK: $args" -ForegroundColor Green }
 function Write-Info { Write-Host "  $args" -ForegroundColor White }
 
 Write-Step "Triggering search workflow..."

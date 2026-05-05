@@ -1,0 +1,10 @@
+MEMORY.md
+.env
+.env.*
+node_modules/
+coverage/
+*.log
+crm.sqlite
+*.sqlite
+test-results.json
+verification-queue.json
