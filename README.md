@@ -1,5 +1,7 @@
 # McCullough Search
 
+Developed by [Fred McCullough](https://github.com/GalToast)
+
 AI-first local-business intelligence support tool for finding and verifying first-party business websites.
 
 This repo is a deterministic search and scoring stage in the broader McCullough Digital operating system. Its role is intentionally narrow: take messy lead names, search with structured variations, rank candidate websites, and hand off clear evidence to downstream human or AI-assisted review workflows.
