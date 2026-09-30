@@ -58,7 +58,7 @@ on:
         description: 'Ground truth file for compare mode'
         required: false
         type: string
-        default: './ground-truth-fresh.json'
+        default: 'examples/ground-truth.sample.json'
       concurrency:
         description: 'Parallel workers for compare mode'
         required: false
@@ -147,7 +147,7 @@ jobs:
             search-result.json
             test-results.json
             verification-queue.json
-            ground-truth-fresh.json
+            ${{ inputs.ground_truth_file }}
           if-no-files-found: ignore
           retention-days: 1
 
