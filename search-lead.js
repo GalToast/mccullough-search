@@ -125,21 +125,43 @@ const CDN_HOST_PATTERNS = [
 ];
 
 /**
- * Parse CLI args
+ * Convert kebab-case to camelCase: max-queries -> maxQueries
  */
-function parseArgs() {
+function toCamelCase(key) {
+  return key.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+/**
+ * Parse CLI args
+ *
+ * Accepts both `--key value` and `--key=value` forms. Each flag is stored
+ * under its original key AND a camelCase alias, so `--max-queries 3` and
+ * `--maxQueries 3` both work.
+ */
+function parseArgs(argv = process.argv.slice(2)) {
   const args = {};
-  const raw = process.argv.slice(2);
-  
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i].startsWith('--')) {
-      const key = raw[i].slice(2);
-      const value = raw[i + 1] && !raw[i + 1].startsWith('--') ? raw[i + 1] : true;
-      args[key] = value;
+
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith('--')) continue;
+
+    const token = argv[i].slice(2);
+    let key;
+    let value;
+    const eqIdx = token.indexOf('=');
+    if (eqIdx !== -1) {
+      key = token.slice(0, eqIdx);
+      value = token.slice(eqIdx + 1);
+    } else {
+      key = token;
+      value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : true;
       if (value !== true) i++;
     }
+
+    args[key] = value;
+    const camel = toCamelCase(key);
+    if (camel !== key) args[camel] = value;
   }
-  
+
   return args;
 }
 
@@ -1218,18 +1240,21 @@ async function searchLead(leadName, location = {}, options = {}) {
 
 /**
  * SQLite helper (simple, no dependencies)
+ *
+ * Shells out to the sqlite3 CLI with NO shell: the db path and the SQL
+ * are passed as an argv array, so hostile values can never be re-parsed
+ * as shell syntax. Values interpolated into the SQL itself are validated
+ * by the callers (see assertLeadId / assertStatusToken).
  */
 function querySQLite(dbPath, sql) {
-  // We'll shell out to sqlite3 CLI for simplicity
-  // In production, would use better-sqlite3 or similar
-  const { execSync } = require('child_process');
-  
+  const { execFileSync } = require('child_process');
+
   try {
-    const result = execSync(`sqlite3 "${dbPath}" "${sql}"`, {
+    const result = execFileSync('sqlite3', [dbPath, sql], {
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024
     });
-    
+
     return result.trim().split('\n').filter(line => line.length > 0);
   } catch (error) {
     throw new Error(`SQLite query failed: ${error.message}`);
@@ -1237,11 +1262,31 @@ function querySQLite(dbPath, sql) {
 }
 
 /**
+ * A lead ID must be a plain integer before it may be interpolated into SQL.
+ */
+function assertLeadId(value) {
+  if (!/^\d+$/.test(String(value))) {
+    throw new Error(`Refusing to run SQL with unsafe lead ID: ${value}`);
+  }
+  return String(value);
+}
+
+/**
+ * A status token must be a simple word before it may be interpolated into SQL.
+ */
+function assertStatusToken(value) {
+  if (!/^[-A-Za-z0-9_ ]+$/.test(String(value))) {
+    throw new Error(`Refusing to run SQL with unsafe status: ${value}`);
+  }
+  return String(value);
+}
+
+/**
  * Load lead from database
  */
 function loadLeadFromDB(dbPath, leadId) {
   const rows = querySQLite(dbPath, 
-    `SELECT lead_id, name, status, profile_path FROM leadops_leads WHERE lead_id = ${leadId}`
+    `SELECT lead_id, name, status, profile_path FROM leadops_leads WHERE lead_id = ${assertLeadId(leadId)}`
   );
   
   if (!rows.length) {
@@ -1371,8 +1416,9 @@ async function main() {
   // Batch search
   if (args.batch && args.db) {
     const dbPath = path.resolve(args.db);
-    const limit = args.limit ? parseInt(args.limit) : 10;
-    const status = args.status || 'research';
+    // parseInt + Math.max re-serialize to a plain integer, so LIMIT is injection-proof
+    const limit = Math.max(1, args.limit ? parseInt(args.limit, 10) : 10);
+    const status = assertStatusToken(args.status || 'research');
     
     // Get leads needing research
     const rows = querySQLite(dbPath,
@@ -1465,4 +1511,8 @@ Environment:
 `);
 }
 
-main().catch(console.error);
+if (require.main === module) {
+  main().catch(console.error);
+}
+
+module.exports = { parseArgs, toCamelCase, querySQLite, assertLeadId, assertStatusToken };
