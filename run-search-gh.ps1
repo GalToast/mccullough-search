@@ -19,7 +19,7 @@ State code (default: TX)
 ZIP code for location context
 
 .PARAMETER MaxQueries
-Maximum search queries per lead (default: 3)
+Maximum search queries per lead (default: 8)
 
 .PARAMETER MinScore
 Minimum score threshold (default: 15)
@@ -130,16 +130,17 @@ if ($RunMode -eq "compare-ground-truth" -and (Test-Path "./search-result-temp/te
     
     Write-Host "`n========== SEARCH RESULT ==========" -ForegroundColor Yellow
     Write-Host "Status: $($result.status)" -ForegroundColor White
-    Write-Host "Lead: $($result.lead_name)" -ForegroundColor White
-    Write-Host "Queries: $($result.queries_attempted)" -ForegroundColor White
-    Write-Host "Candidates: $($result.candidates_found)" -ForegroundColor White
+    Write-Host "Lead: $($result.leadName)" -ForegroundColor White
+    Write-Host "Queries: $($result.queriesAttempted)" -ForegroundColor White
+    Write-Host "Total results: $($result.totalResults)" -ForegroundColor White
+    Write-Host "Candidates: $($result.candidates.Count)" -ForegroundColor White
     
-    if ($result.best_match) {
+    if ($result.bestMatch) {
         Write-Host "`nBEST MATCH:" -ForegroundColor Green
-        Write-Host "  Score: $($result.best_match.score)" -ForegroundColor White
-        Write-Host "  URL: $($result.best_match.url)" -ForegroundColor White
-        Write-Host "  Domain: $($result.best_match.domain)" -ForegroundColor White
-        Write-Host "  Title: $($result.best_match.title)" -ForegroundColor White
+        Write-Host "  Score: $($result.bestMatch.score)" -ForegroundColor White
+        Write-Host "  URL: $($result.bestMatch.url)" -ForegroundColor White
+        Write-Host "  Domain: $($result.bestMatch.domain)" -ForegroundColor White
+        Write-Host "  Title: $($result.bestMatch.title)" -ForegroundColor White
     }
     
     Write-Host "`n===================================" -ForegroundColor Yellow
