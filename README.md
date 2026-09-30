@@ -1,5 +1,7 @@
 # McCullough Search
 
+[![CI](https://github.com/GalToast/mccullough-search/actions/workflows/ci.yml/badge.svg)](https://github.com/GalToast/mccullough-search/actions/workflows/ci.yml)
+
 Developed by [Fred McCullough](https://github.com/GalToast)
 
 AI-first local-business intelligence support tool for finding and verifying first-party business websites.
@@ -47,11 +49,20 @@ node search-lead.js --batch --limit 10 --db ../crm.sqlite --status research
 ### GitHub Actions
 
 ```powershell
-# Trigger search workflow from local
-.\run-search-gh.ps1 -LeadName "Good Charlie's Conroe" -City "Conroe" -State "TX"
+# Trigger a single-lead search from local (RunMode defaults to
+# compare-ground-truth, which ignores -LeadName)
+.\run-search-gh.ps1 -RunMode single-lead -LeadName "Good Charlie's Conroe" -City "Conroe" -State "TX"
 ```
 
 Or via GitHub UI: Actions → Search Lead → Run workflow
+
+## Prerequisites
+
+- **Node.js 20+** (CI runs the syntax check and unit tests on Node 20)
+- **sqlite3 CLI** — required for `--db` modes (`--lead-id`, `--batch`, and the harness `--db` source). Install: `apt install sqlite3` / `brew install sqlite3` / [sqlite.org](https://www.sqlite.org/download.html)
+- **SearXNG** — the scripts talk to a SearXNG instance at `http://127.0.0.1:8889` by default (override with `SEARXNG_URL`). The `search-lead.yml` workflow starts one in Docker; locally you need your own, e.g. `docker run -d -p 8889:8080 searxng/searxng:latest`.
+
+> Note: live search quality was **not** verified in this environment — Docker was unavailable here, so no live SearXNG instance could be started. The checked-in `examples/` outputs come from an earlier run with a live instance; your hit rates will depend on the SearXNG instance you point at.
 
 ### Test Harness
 
@@ -60,6 +71,45 @@ node test-harness.js --ground-truth examples/ground-truth.sample.json
 ```
 
 The harness compares search output against known domains and writes local review artifacts such as `test-results.json` and `verification-queue.json`. Checked-in sample outputs live under `examples/`.
+
+### Sample output
+
+A 6-case harness run writes `test-results.json` shaped like this (excerpt from `examples/test-results.sample.json`):
+
+```json
+{
+  "timestamp": "2026-03-30T15:30:35.276Z",
+  "totalTests": 6,
+  "hits": 5,
+  "misses": 1,
+  "pending": 0,
+  "hitRate": 0.8333333333333334,
+  "results": [
+    {
+      "leadId": 9,
+      "name": "105 SPEEDWAY",
+      "expectedDomain": "105speedwayracing.com",
+      "foundDomain": "105speedwayracing.com",
+      "verified": false,
+      "verdict": "HIT",
+      "candidates": [
+        { "domain": "105speedwayracing.com", "score": 50, "verified": false }
+      ]
+    },
+    {
+      "leadId": 3,
+      "name": "Northern Tool and Equipment",
+      "expectedDomain": "northerntool.com",
+      "foundDomain": "none",
+      "verified": false,
+      "verdict": "MISS",
+      "candidates": []
+    }
+  ]
+}
+```
+
+Cases that are not clean hits (misses and ambiguous candidates) go into `verification-queue.json` for human or AI-assisted review.
 
 ## Environment
 
@@ -84,11 +134,14 @@ Minimum score threshold: 15 (default)
 
 - `search-lead.js` - Search, scoring, verification, JSON output, and batch mode
 - `test-harness.js` - Ground-truth validation and hit-rate reporting
+- `test/args.test.js` - Unit tests (arg parsing, SQL input validation, sqlite invocation)
 - `run-search-gh.ps1` - PowerShell runner for GitHub Actions
+- `LICENSE` - MIT license
 - `examples/ground-truth.sample.json` - Known-answer sample dataset for validation
 - `examples/test-results.sample.json` - Example harness output
 - `examples/verification-queue.sample.json` - Example ambiguous or missed cases queued for review
 - `.github/workflows/search-lead.yml` - GitHub workflow with SearXNG container
+- `.github/workflows/ci.yml` - CI: Node syntax check + unit tests on push/PR
 
 ## Why It Matters
 

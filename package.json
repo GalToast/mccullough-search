@@ -5,7 +5,8 @@
   "main": "search-lead.js",
   "scripts": {
     "search": "node search-lead.js",
-    "batch": "node search-lead.js --batch"
+    "batch": "node search-lead.js --batch",
+    "test": "node --test test/args.test.js"
   },
   "keywords": ["lead", "search", "searxng", "website-discovery"],
   "author": "McCullough Digital",
