@@ -12,18 +12,41 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync, execFile } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
-// Parse args
-const args = process.argv.slice(2).reduce((acc, arg) => {
-  if (arg.startsWith('--')) {
-    const [key, value] = arg.split('=');
-    acc[key.slice(2)] = value || true;
+// Parse args: accept --key=value and --key value forms. Each flag is stored
+// under its original key AND a camelCase alias (ground-truth -> groundTruth),
+// so both spellings work.
+function toCamelCase(key) {
+  return key.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+function parseTestArgs(argv = process.argv.slice(2)) {
+  const args = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith('--')) continue;
+    const token = argv[i].slice(2);
+    let key;
+    let value;
+    const eqIdx = token.indexOf('=');
+    if (eqIdx !== -1) {
+      key = token.slice(0, eqIdx);
+      value = token.slice(eqIdx + 1);
+    } else {
+      key = token;
+      value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : true;
+      if (value !== true) i++;
+    }
+    args[key] = value;
+    const camel = toCamelCase(key);
+    if (camel !== key) args[camel] = value;
   }
-  return acc;
-}, {});
+  return args;
+}
+
+const args = parseTestArgs();
 
 const SEARXNG_URL = process.env.SEARXNG_URL || 'http://127.0.0.1:8889';
 const SCRIPT_PATH = path.join(__dirname, 'search-lead.js');
@@ -32,58 +55,70 @@ const ENGINE_PROFILES = ['text-primary', 'full-primary'];
 // Ground truth file format: [{ leadId, name, city, state, expectedWebsite, expectedDomain }]
 let testCases = [];
 
-if (args['ground-truth']) {
-  // Load from JSON file
-  testCases = JSON.parse(fs.readFileSync(args['ground-truth'], 'utf8'));
-} else if (args['db'] && args['limit']) {
-  // Query from database - get leads with known websites for testing
-  const dbPath = args['db'];
-  const limit = parseInt(args['limit']) || 10;
-  const status = args['status'] || 'ready';
-  
-  // Use sqlite3 CLI to query
-  const query = `SELECT lead_id, name, website FROM leadops_leads WHERE status = '${status}' AND website IS NOT NULL AND website != '' AND website NOT LIKE '%offline%' LIMIT ${limit}`;
-  
-  try {
-    const output = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: 'utf8' });
-    const lines = output.trim().split('\n');
-    
-    testCases = lines.map(line => {
-      const [id, name, website] = line.split('|');
-      // Extract domain from website
-      const domain = website.replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
-      return {
-        leadId: parseInt(id),
-        name: name,
-        website: website,
-        expectedDomain: domain
-      };
-    });
-  } catch (e) {
-    console.error(`Failed to query database: ${e.message}`);
-    process.exit(1);
+// A status token must be a simple word before it may be interpolated into SQL.
+function assertStatusToken(value) {
+  if (!/^[-A-Za-z0-9_ ]+$/.test(String(value))) {
+    throw new Error(`Refusing to run SQL with unsafe status: ${value}`);
   }
-} else {
-  // Default: use hardcoded test cases
-  testCases = [
-    { leadId: 9, name: '105 SPEEDWAY', expectedDomain: '105speedwayracing.com' },
-    { leadId: 22, name: 'Good Charlie\'s Oyster Bar', city: 'Conroe', state: 'TX', expectedDomain: 'goodcharlies.com' },
-    { leadId: 3, name: 'Northern Tool and Equipment', city: 'Conroe', state: 'TX', expectedDomain: 'northerntool.com' },
-    { leadId: 1, name: '1845 SOLUTIONS', expectedDomain: '1845solutions.com' },
-    { leadId: 10, name: '1097 WATER SPORTS INC.', expectedDomain: '1097watersports.com' },
-    { leadId: 12, name: '12 Acre Woods RV Park, LLC', expectedDomain: '12acrewoodsrvpark.com' },
-  ];
+  return String(value);
 }
 
-console.log(`\n========================================`);
-console.log(`LEAD SEARCH TEST HARNESS`);
-console.log(`========================================`);
-console.log(`Test cases: ${testCases.length}`);
-console.log(`SearXNG: ${SEARXNG_URL}`);
-if (args['compare-engine-profiles']) {
-  console.log(`Engine profile comparison: ${ENGINE_PROFILES.join(' vs ')}`);
+function loadTestCases() {
+  if (args['ground-truth']) {
+    // Load from JSON file
+    testCases = JSON.parse(fs.readFileSync(args['ground-truth'], 'utf8'));
+  } else if (args['db'] && args['limit']) {
+    // Query from database - get leads with known websites for testing
+    const dbPath = args['db'];
+    // parseInt re-serializes to a plain integer, so LIMIT is injection-proof
+    const limit = Math.max(1, parseInt(args['limit'], 10) || 10);
+    const status = assertStatusToken(args['status'] || 'ready');
+
+    // Use sqlite3 CLI via argv array: no shell, so db paths can never
+    // be re-parsed as shell syntax.
+    const query = `SELECT lead_id, name, website FROM leadops_leads WHERE status = '${status}' AND website IS NOT NULL AND website != '' AND website NOT LIKE '%offline%' LIMIT ${limit}`;
+
+    try {
+      const output = execFileSync('sqlite3', [dbPath, query], { encoding: 'utf8' });
+      const lines = output.trim().split('\n');
+    
+      testCases = lines.map(line => {
+        const [id, name, website] = line.split('|');
+        // Extract domain from website
+        const domain = website.replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
+        return {
+          leadId: parseInt(id),
+          name: name,
+          website: website,
+          expectedDomain: domain
+        };
+      });
+    } catch (e) {
+      console.error(`Failed to query database: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    // Default: use hardcoded test cases
+    testCases = [
+      { leadId: 9, name: '105 SPEEDWAY', expectedDomain: '105speedwayracing.com' },
+      { leadId: 22, name: 'Good Charlie\'s Oyster Bar', city: 'Conroe', state: 'TX', expectedDomain: 'goodcharlies.com' },
+      { leadId: 3, name: 'Northern Tool and Equipment', city: 'Conroe', state: 'TX', expectedDomain: 'northerntool.com' },
+      { leadId: 1, name: '1845 SOLUTIONS', expectedDomain: '1845solutions.com' },
+      { leadId: 10, name: '1097 WATER SPORTS INC.', expectedDomain: '1097watersports.com' },
+      { leadId: 12, name: '12 Acre Woods RV Park, LLC', expectedDomain: '12acrewoodsrvpark.com' },
+    ];
+  }
+
+  console.log(`\n========================================`);
+  console.log(`LEAD SEARCH TEST HARNESS`);
+  console.log(`========================================`);
+  console.log(`Test cases: ${testCases.length}`);
+  console.log(`SearXNG: ${SEARXNG_URL}`);
+  if (args['compare-engine-profiles']) {
+    console.log(`Engine profile comparison: ${ENGINE_PROFILES.join(' vs ')}`);
+  }
+  console.log(`\n`);
 }
-console.log(`\n`);
 
 function buildArgs(test, engineProfile) {
   const cmdArgs = [SCRIPT_PATH, '--lead', test.name];
@@ -197,6 +232,7 @@ async function runWithConcurrency(tasks, concurrency) {
 }
 
 async function main() {
+  loadTestCases();
   const compareProfiles = Boolean(args['compare-engine-profiles']);
   const profilesToRun = compareProfiles ? ENGINE_PROFILES : [args['engine-profile'] || 'text-primary'];
   const concurrency = Math.max(1, parseInt(args.concurrency || (compareProfiles ? 4 : 2), 10));
@@ -259,7 +295,11 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(error => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = { parseTestArgs, toCamelCase, assertStatusToken, loadTestCases, getTestCases: () => testCases };
