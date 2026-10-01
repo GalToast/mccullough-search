@@ -109,3 +109,39 @@ describe('querySQLite (no-shell sqlite3 invocation)', () => {
     assert.throws(() => searchLead.querySQLite('/tmp/does-not-exist-dir/x.db', 'select 1'), /SQLite query failed/);
   });
 });
+
+describe('isStrongFirstPartyMatch (verification gate)', () => {
+  const f = searchLead.isStrongFirstPartyMatch;
+
+  it('is defined (was a ReferenceError: verifyCandidate could never succeed)', () => {
+    assert.equal(typeof f, 'function');
+  });
+
+  it('matches when the domain contains the compact business name', () => {
+    assert.equal(f('zqxjvwumbo.test', 'Zqxjv Wumbo'), true);
+    assert.equal(f('www.zebraplumbing.com', 'Zebra Plumbing'), true);
+  });
+
+  it('rejects directories and unrelated domains', () => {
+    assert.equal(f('yelp.com', 'Zebra Plumbing'), false);
+    assert.equal(f('example.com', 'Zebra Plumbing'), false);
+  });
+
+  it('rejects empty or very short names', () => {
+    assert.equal(f('', 'Zebra Plumbing'), false);
+    assert.equal(f('abc.co', 'AB'), false);
+  });
+});
+
+describe('parseArgs empty-string values', () => {
+  it('keeps explicit empty strings instead of coercing to true ("--city \'\'")', () => {
+    const a = searchLead.parseArgs(['--lead', 'X', '--city', '']);
+    assert.equal(a.city, '');
+  });
+
+  it('still treats a flag followed by another flag as boolean', () => {
+    const a = searchLead.parseArgs(['--lead', 'X', '--json', '--batch']);
+    assert.equal(a.json, true);
+    assert.equal(a.batch, true);
+  });
+});

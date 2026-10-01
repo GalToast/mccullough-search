@@ -153,7 +153,11 @@ function parseArgs(argv = process.argv.slice(2)) {
       value = token.slice(eqIdx + 1);
     } else {
       key = token;
-      value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : true;
+      // An explicit empty string ("--city ''") is a real value, not a missing
+      // one: only treat the flag as boolean when no next token exists or the
+      // next token is another flag.
+      const next = argv[i + 1];
+      value = (next !== undefined && !next.startsWith('--')) ? next : true;
       if (value !== true) i++;
     }
 
@@ -247,6 +251,22 @@ function isCdnLikeHost(domain) {
   const normalized = normalizeDomain(domain);
   if (!normalized) return false;
   return CDN_HOST_PATTERNS.some(pattern => normalized === pattern || normalized.includes(pattern));
+}
+
+/**
+ * Check whether a candidate domain looks like the business's own site
+ * (as opposed to a directory, aggregator, or unrelated page that merely
+ * mentions the name). verifyCandidate uses this to demote content matches
+ * on non-matching domains to "weak domain identity" instead of verified.
+ *
+ * NOTE: this was referenced by verifyCandidate but never defined, so every
+ * verification threw ReferenceError and no candidate could ever verify.
+ */
+function isStrongFirstPartyMatch(domain, leadName) {
+  const domainCompact = normalizeAlphaNum((domain || '').toLowerCase());
+  const leadCompact = normalizeAlphaNum((leadName || '').toLowerCase());
+  if (leadCompact.length <= 5 || domainCompact.length <= 5) return false;
+  return domainCompact.includes(leadCompact);
 }
 
 /**
@@ -1515,4 +1535,4 @@ if (require.main === module) {
   main().catch(console.error);
 }
 
-module.exports = { parseArgs, toCamelCase, querySQLite, assertLeadId, assertStatusToken };
+module.exports = { parseArgs, toCamelCase, querySQLite, assertLeadId, assertStatusToken, isStrongFirstPartyMatch };

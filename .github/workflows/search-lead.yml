@@ -80,10 +80,18 @@ jobs:
       
       - name: Start SearXNG
         run: |
+          # SearXNG fails closed without a secret key (container exits 1).
+          # The container is ephemeral (removed at the end of the job), so a
+          # random per-run key is fine when the repo secret is not configured.
+          SECRET='${{ secrets.SEARXNG_SECRET }}'
+          if [ -z "$SECRET" ]; then
+            SECRET="$(openssl rand -hex 32)"
+            echo "SEARXNG_SECRET repo secret not set; using an ephemeral key"
+          fi
           docker run -d --name searxng-ci \
             -p 8888:8080 \
             -e SEARXNG_BASE_URL=http://localhost:8080/ \
-            -e SEARXNG_SECRET="${{ secrets.SEARXNG_SECRET }}" \
+            -e SEARXNG_SECRET="$SECRET" \
             searxng/searxng:latest
 
       - name: Wait for SearXNG
@@ -132,7 +140,20 @@ jobs:
               --max-queries ${{ inputs.max_queries }} \
               --min-score ${{ inputs.min_score }} \
               --engine-profile "${{ inputs.engine_profile }}" \
-              --json > search-result.json
+              --json > search-result.tmp
+
+            # --json appends the payload after an "=== JSON OUTPUT ===" marker
+            # (the same marker test-harness.js parses); the artifact must be
+            # pure JSON for ConvertFrom-Json in run-search-gh.ps1.
+            node -e "
+              const fs = require('fs');
+              const raw = fs.readFileSync('search-result.tmp', 'utf8');
+              const m = raw.match(/=== JSON OUTPUT ===\s*(\{[\s\S]*\})/);
+              if (!m) { console.error('JSON block not found in search output'); process.exit(1); }
+              JSON.parse(m[1]);
+              fs.writeFileSync('search-result.json', m[1] + '\n');
+            "
+            rm -f search-result.tmp
 
             echo "=== SEARCH RESULT ==="
             cat search-result.json
