@@ -121,14 +121,26 @@ Local-business website discovery is intentionally treated as a review problem, n
 
 ## Scoring Signals
 
-Results are scored based on:
-- **Domain match**: Does URL domain contain business name words? (+10 per word)
-- **Title match**: Does title contain business name words? (+5 per word)
-- **Exact domain**: Domain exactly matches normalized business name (+50)
-- **First-party penalty**: Directory/social domains penalized (-30)
-- **Location bonus**: City/state in title or URL (+10)
+Results are scored by `scoreResult()` in `search-lead.js`:
 
-Minimum score threshold: 15 (default)
+**Positive signals:**
+- **Domain match**: URL domain contains business name parts (+20 per part)
+- **Title match**: Title contains business name parts (+10 per part)
+- **Snippet match**: Snippet contains business name parts (+6 per part)
+- **Normalized name in domain**: Full normalized business name in domain (+45)
+- **Normalized name in title**: Full normalized business name in title (+25)
+- **Acronym match**: Business acronym in domain (+28) or title/snippet (+12)
+- **Location bonus**: City/state found in title, snippet, or domain (+12 per matched term)
+
+**Penalties:**
+- **Directory domains** (yelp, yellowpages, etc.): -50
+- **Dictionary/encyclopedia sites**: -40
+- **Forums/communities** (reddit, quora, etc.): -30
+- **Unrelated media** (movie/film/song/music in title): -30
+- **CDN/asset hosts**: -120
+- **Academic/journal sites** (for non-tech businesses): -25
+
+Minimum score threshold: 15 (default, configurable via `--min-score`)
 
 ## Files
 
